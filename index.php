@@ -377,20 +377,32 @@ $app->post('/', function (Request $request, Response $response) {
             return redirect($response, '/', 302);
         }
 
-        $db = $this->get('db');
-        $query = 'INSERT INTO `posts` (`user_id`, `mime`, `imgdata`, `body`) VALUES (?,?,?,?)';
+        $ext = "";
+        if ($mime == "image/jpeg") $ext = "jpg";
+        elseif ($mime == "image/png") $ext = "png";
+        elseif ($mime == "image/gif") $ext = "gif";
+
+        $db = $this->get("db");
+        $query = "INSERT INTO `posts` (`user_id`, `mime`, `imgdata`, `body`) VALUES (?,?,?,?)";
         $ps = $db->prepare($query);
         $ps->execute([
-          $me['id'],
-          $mime,
-          file_get_contents($_FILES['file']['tmp_name']),
-          $params['body'],
+            $me["id"],
+            $mime,
+            "",
+            $params["body"],
         ]);
         $pid = $db->lastInsertId();
+
+        $image_dir = "/home/public/image";
+        if (!file_exists($image_dir)) {
+            mkdir($image_dir, 0777, true);
+        }
+        move_uploaded_file($_FILES["file"]["tmp_name"], "$image_dir/{$pid}.{$ext}");
+
         return redirect($response, "/posts/{$pid}", 302);
     } else {
-        $this->get('flash')->addMessage('notice', '画像が必須です');
-        return redirect($response, '/', 302);
+        $this->get("flash")->addMessage("notice", "画像が必須です");
+        return redirect($response, "/", 302);
     }
 });
 
@@ -399,14 +411,18 @@ $app->get('/image/{id}.{ext}', function (Request $request, Response $response, $
         return $response;
     }
 
-    $post = $this->get('helper')->fetch_first('SELECT * FROM `posts` WHERE `id` = ?', $args['id']);
+    $image_path = "/home/public/image/{$args['id']}.{$args['ext']}";
 
-    if (($args['ext'] == 'jpg' && $post['mime'] == 'image/jpeg') ||
-        ($args['ext'] == 'png' && $post['mime'] == 'image/png') ||
-        ($args['ext'] == 'gif' && $post['mime'] == 'image/gif')) {
-        $response->getBody()->write($post['imgdata']);
-        return $response->withHeader('Content-Type', $post['mime']);
+    if (file_exists($image_path)) {
+        $mime = "";
+        if ($args["ext"] == "jpg") $mime = "image/jpeg";
+        elseif ($args["ext"] == "png") $mime = "image/png";
+        elseif ($args["ext"] == "gif") $mime = "image/gif";
+        
+        $response->getBody()->write(file_get_contents($image_path));
+        return $response->withHeader('Content-Type', $mime);
     }
+    
     $response->getBody()->write('404');
     return $response->withStatus(404);
 });
