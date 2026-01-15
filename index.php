@@ -128,28 +128,68 @@ $container->set('helper', function ($c) {
         }
 
         public function make_posts(array $results, $options = []) {
-            $options += ['all_comments' => false];
-            $all_comments = $options['all_comments'];
+            $options += ["all_comments" => false];
+            $all_comments = $options["all_comments"];
+
+            if (empty($results)) {
+                return [];
+            }
+
+            $post_ids = array_column($results, "id");
+            $user_ids = array_unique(array_column($results, "user_id"));
+
+            $placeholder_users = implode(",", array_fill(0, count($user_ids), "?"));
+            $stmt = $this->db()->prepare("SELECT * FROM `users` WHERE `id` IN ($placeholder_users)");
+            $user_ids = array_values($user_ids);
+            $stmt->execute($user_ids);
+            $users = [];
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $user) {
+                $users[$user["id"]] = $user;
+            }
+
+            $placeholder = implode(",", array_fill(0, count($post_ids), "?"));
+            $stmt = $this->db()->prepare("SELECT `post_id`, COUNT(*) AS `count` FROM `comments` WHERE `post_id` IN ($placeholder) GROUP BY `post_id`");
+            $stmt->execute($post_ids);
+            $comment_counts = [];
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $comment_counts[$row["post_id"]] = $row["count"];
+            }
+
+            $stmt = $this->db()->prepare("SELECT * FROM `comments` WHERE `post_id` IN ($placeholder) ORDER BY `created_at` DESC");
+            $stmt->execute($post_ids);
+            $all_comments_data = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+            $comment_user_ids = array_unique(array_column($all_comments_data, "user_id"));
+            if (!empty($comment_user_ids)) {
+            $placeholder2 = implode(",", array_fill(0, count($comment_user_ids), "?"));
+            $stmt = $this->db()->prepare("SELECT * FROM `users` WHERE `id` IN ($placeholder2)");
+            $comment_user_ids = array_values($comment_user_ids);
+            $stmt->execute($comment_user_ids);
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $user) {
+            $users[$user["id"]] = $user;
+                }
+            }
+
+            $comments_by_post = [];
+            foreach ($all_comments_data as $comment) {
+                if (!isset($comments_by_post[$comment["post_id"]])) {
+                    $comments_by_post[$comment["post_id"]] = [];
+                }
+                $comment["user"] = $users[$comment["user_id"]] ?? null;
+                $comments_by_post[$comment["post_id"]][] = $comment;
+            }
 
             $posts = [];
             foreach ($results as $post) {
-                $post['comment_count'] = $this->fetch_first('SELECT COUNT(*) AS `count` FROM `comments` WHERE `post_id` = ?', $post['id'])['count'];
-                $query = 'SELECT * FROM `comments` WHERE `post_id` = ? ORDER BY `created_at` DESC';
+                $post["comment_count"] = $comment_counts[$post["id"]] ?? 0;
+                $comments = $comments_by_post[$post["id"]] ?? [];
                 if (!$all_comments) {
-                    $query .= ' LIMIT 3';
+                    $comments = array_slice($comments, 0, 3);
                 }
-
-                $ps = $this->db()->prepare($query);
-                $ps->execute([$post['id']]);
-                $comments = $ps->fetchAll(PDO::FETCH_ASSOC);
-                foreach ($comments as &$comment) {
-                    $comment['user'] = $this->fetch_first('SELECT * FROM `users` WHERE `id` = ?', $comment['user_id']);
-                }
-                unset($comment);
-                $post['comments'] = array_reverse($comments);
-
-                $post['user'] = $this->fetch_first('SELECT * FROM `users` WHERE `id` = ?', $post['user_id']);
-                if ($post['user']['del_flg'] == 0) {
+                $post["comments"] = array_reverse($comments);
+                $post["user"] = $users[$post["user_id"]] ?? null;
+        
+                if ($post["user"] && $post["user"]["del_flg"] == 0) {
                     $posts[] = $post;
                 }
                 if (count($posts) >= POSTS_PER_PAGE) {
@@ -158,10 +198,8 @@ $container->set('helper', function ($c) {
             }
             return $posts;
         }
-
     };
-});
-
+});    
 AppFactory::setContainer($container);
 $app = AppFactory::create();
 
