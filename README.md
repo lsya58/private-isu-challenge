@@ -44,3 +44,9 @@ DBだと、取得するのが重すぎたためです。
 
 - スコア: 2787→2651 (効果なし)
 - 設定ファイル: webapp/etc/nginx/conf.d/php.conf
+
+### 5. created_atインデックス追加
+ORDER BY created_at がボトルネックになって遅かったため、posts.created_at にインデックスを追加しました。
+
+- スコア: 2787→3997(大幅に向上)
+
